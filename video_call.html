@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Call</title>
+</head>
+<body>
+    <h1>Video Call Application</h1>
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+    <br>
+    <button id="startCallButton">Start Call</button>
+    <button id="endCallButton">End Call</button>
+
+    <script>
+        const signalingServerUrl = 'wss://your-signaling-server-url'; // Replace with your WebSocket server URL
+        const socket = new WebSocket(signalingServerUrl);
+
+        let isCaller = false;
+
+        // Define missing variables
+        const startCallButton = document.getElementById('startCallButton');
+        const endCallButton = document.getElementById('endCallButton');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        let peerConnection = null;
+        let localStream = null;
+        const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }; // Example STUN server
+
+        socket.onmessage = async (message) => {
+            const data = JSON.parse(message.data);
+
+            if (data.type === 'offer') {
+                peerConnection = new RTCPeerConnection(servers);
+
+                peerConnection.ontrack = event => {
+                    remoteVideo.srcObject = event.streams[0];
+                };
+
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate) {
+                        socket.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                    }
+                };
+
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                socket.send(JSON.stringify({ type: 'answer', answer }));
+            } else if (data.type === 'answer') {
+                peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } else if (data.type === 'candidate') {
+                peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        };
+
+        startCallButton.addEventListener('click', async () => {
+            isCaller = true;
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+
+            peerConnection = new RTCPeerConnection(servers);
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            peerConnection.ontrack = event => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                }
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.send(JSON.stringify({ type: 'offer', offer }));
+        });
+
+        endCallButton.addEventListener('click', () => {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+        });        joinRoomButton.addEventListener('click', () => {
+            const roomNumber = roomNumberInput.value.trim();
+            const roomPassword = document.getElementById('roomPassword').value.trim();
+        
+            if (roomNumber && roomPassword) {
+                const joinLink = `${window.location.origin}?room=${roomNumber}`;
+                joinLinkSpan.textContent = joinLink;
+                joinLinkSpan.style.color = 'blue';
+                joinLinkSpan.style.cursor = 'pointer';
+                joinLinkSpan.addEventListener('click', () => {
+                    window.open(joinLink, '_blank');
+                });
+        
+                // Send room ID and password to the server
+                socket.send(JSON.stringify({ type: 'join', room: roomNumber, password: roomPassword }));
+                alert(`Attempting to join room ${roomNumber}.`);
+            } else {
+                alert('Please enter a valid room number and password.');
+            }
+        });
+        
+        socket.onmessage = (message) => {
+            const data = JSON.parse(message.data);
+        
+            if (data.type === 'join') {
+                if (data.success) {
+                    alert(`Successfully joined room ${data.room}`);
+                } else {
+                    alert(`Failed to join room: ${data.error}`);
+                }
+            }
+        };
+    </script>
+<br>
+<label for="roomNumber">Room Number:</label>
+<input type="text" id="roomNumber" placeholder="Enter Room Number">
+<label for="roomPassword">Room Password:</label>
+<input type="password" id="roomPassword" placeholder="Enter Room Password">
+<button id="joinRoomButton">Join Room</button>
+<p>Share this link to join: <span id="joinLink"></span></p>
+
+<script>
+    const joinRoomButton = document.getElementById('joinRoomButton');
+    const roomNumberInput = document.getElementById('roomNumber');
+    const joinLinkSpan = document.getElementById('joinLink');
+
+    joinRoomButton.addEventListener('click', () => {
+        const roomNumber = roomNumberInput.value.trim();
+        if (roomNumber) {
+            const joinLink = `${window.location.origin}?room=${roomNumber}`;
+            joinLinkSpan.textContent = joinLink;
+            joinLinkSpan.style.color = 'blue';
+            joinLinkSpan.style.cursor = 'pointer';
+            joinLinkSpan.addEventListener('click', () => {
+                window.open(joinLink, '_blank');
+            });
+            socket.send(JSON.stringify({ type: 'join', room: roomNumber }));
+            alert(`Joined room ${roomNumber}. Share the link to invite others.`);
+        } else {
+            alert('Please enter a valid room number.');
+        }
+    });
+
+    socket.onmessage = (message) => {
+        const data = JSON.parse(message.data);
+
+        if (data.type === 'join') {
+            alert(`A user has joined room ${data.room}`);
+        }
+    };
+</script>
+</script>
+</body>
+</html>
